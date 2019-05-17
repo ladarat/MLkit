@@ -34,19 +34,21 @@ abstract class VisionProcessorBase<T> : VisionImageProcessor {
     private val shouldThrottle = AtomicBoolean(false)
 
     override fun process(
-            data: ByteBuffer, frameMetadata: FrameMetadata, ocrListener: OcrListener) {
+        data: ByteBuffer, frameMetadata: FrameMetadata, ocrListener: OcrListener
+    ) {
         if (shouldThrottle.get()) {
             return
         }
         val metadata = FirebaseVisionImageMetadata.Builder()
-                .setFormat(FirebaseVisionImageMetadata.IMAGE_FORMAT_NV21)
-                .setWidth(frameMetadata.width)
-                .setHeight(frameMetadata.height)
-                .setRotation(frameMetadata.rotation)
-                .build()
+            .setFormat(FirebaseVisionImageMetadata.IMAGE_FORMAT_NV21)
+            .setWidth(frameMetadata.width)
+            .setHeight(frameMetadata.height)
+            .setRotation(frameMetadata.rotation)
+            .build()
 
         detectInVisionImage(
-                FirebaseVisionImage.fromByteBuffer(data, metadata), frameMetadata, ocrListener)
+            FirebaseVisionImage.fromByteBuffer(data, metadata), frameMetadata, ocrListener
+        )
     }
 
     // Bitmap version
@@ -64,15 +66,21 @@ abstract class VisionProcessorBase<T> : VisionImageProcessor {
         }
 
         val frameMetadata = FrameMetadata.Builder()
-                .setWidth(frame.size.width)
-                .setHeight(frame.size.height)
-                .setRotation(frame.rotation).build()
+            .setWidth(frame.size.width)
+            .setHeight(frame.size.height)
+            .setRotation(frame.rotation)
+            .build()
         val metadata = FirebaseVisionImageMetadata.Builder()
-                .setFormat(FirebaseVisionImageMetadata.IMAGE_FORMAT_NV21)
-                .setWidth(frameMetadata.width)
-                .setHeight(frameMetadata.height)
-                .build()
-        detectInVisionImage(FirebaseVisionImage.fromByteArray(frame.image, metadata), frameMetadata, ocrListener)
+            .setFormat(FirebaseVisionImageMetadata.IMAGE_FORMAT_NV21)
+            .setWidth(frameMetadata.width)
+            .setHeight(frameMetadata.height)
+            .setRotation(frameMetadata.rotation)
+            .build()
+        detectInVisionImage(
+            FirebaseVisionImage.fromByteArray(frame.image, metadata),
+            frameMetadata,
+            ocrListener
+        )
     }
 
     /**
@@ -85,27 +93,29 @@ abstract class VisionProcessorBase<T> : VisionImageProcessor {
             return
         }
         // This is for overlay display's usage
-        val frameMetadata = FrameMetadata.Builder().setWidth(image.width).setHeight(image.height).build()
+        val frameMetadata =
+            FrameMetadata.Builder().setWidth(image.width).setHeight(image.height).build()
         val fbVisionImage = FirebaseVisionImage.fromMediaImage(image, rotation)
         detectInVisionImage(fbVisionImage, frameMetadata, ocrListener)
     }
 
     private fun detectInVisionImage(
-            image: FirebaseVisionImage,
-            metadata: FrameMetadata?,
-            ocrListener: OcrListener) {
+        image: FirebaseVisionImage,
+        metadata: FrameMetadata?,
+        ocrListener: OcrListener
+    ) {
         val start = System.currentTimeMillis()
         detectInImage(image)
-                .addOnSuccessListener { results ->
-                    shouldThrottle.set(false)
-                    val timeRequired = System.currentTimeMillis() - start
-                    this@VisionProcessorBase.onSuccess(results, metadata, timeRequired, ocrListener)
-                }
-                .addOnFailureListener { e ->
-                    shouldThrottle.set(false)
-                    val timeRequired = System.currentTimeMillis() - start
-                    this@VisionProcessorBase.onFailure(e, timeRequired, ocrListener)
-                }
+            .addOnSuccessListener { results ->
+                shouldThrottle.set(false)
+                val timeRequired = System.currentTimeMillis() - start
+                this@VisionProcessorBase.onSuccess(results, metadata, timeRequired, ocrListener)
+            }
+            .addOnFailureListener { e ->
+                shouldThrottle.set(false)
+                val timeRequired = System.currentTimeMillis() - start
+                this@VisionProcessorBase.onFailure(e, timeRequired, ocrListener)
+            }
         // Begin throttling until this frame of input has been processed, either in onSuccess or
         // onFailure.
         shouldThrottle.set(true)
@@ -116,10 +126,11 @@ abstract class VisionProcessorBase<T> : VisionImageProcessor {
     protected abstract fun detectInImage(image: FirebaseVisionImage): Task<T>
 
     protected abstract fun onSuccess(
-            results: T,
-            frameMetadata: FrameMetadata?,
-            timeRequired: Long,
-            ocrListener: OcrListener)
+        results: T,
+        frameMetadata: FrameMetadata?,
+        timeRequired: Long,
+        ocrListener: OcrListener
+    )
 
     protected abstract fun onFailure(e: Exception, timeRequired: Long, ocrListener: OcrListener)
 

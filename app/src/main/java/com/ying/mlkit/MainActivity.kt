@@ -1,10 +1,10 @@
 package com.ying.mlkit
 
-import androidx.appcompat.app.AppCompatActivity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.hardware.Camera
 import android.net.Uri
 import android.os.Bundle
@@ -13,6 +13,8 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.exifinterface.media.ExifInterface
 import com.google.firebase.ml.vision.FirebaseVision
 import com.google.firebase.ml.vision.common.FirebaseVisionImage
 import com.google.firebase.ml.vision.text.FirebaseVisionText
@@ -20,77 +22,67 @@ import io.fotoapparat.Fotoapparat
 import io.fotoapparat.preview.Frame
 import io.fotoapparat.util.FrameProcessor
 import kotlinx.android.synthetic.main.activity_main.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.jmrtd.lds.icao.MRZInfo
+import java.io.IOException
 import java.util.regex.Pattern
 
 
-class MainActivity : AppCompatActivity(),CameraMLKItListener {
+class MainActivity : AppCompatActivity(), CameraMLKItListener, VisionProcessorBase.OcrListener {
+
+    override fun onMRZRead(mrzInfo: MRZInfo, timeRequired: Long) {
+        mHandler.post {
+            try {
+                if (cameraMLKitFragmentListener != null) {
+                    cameraMLKitFragmentListener!!.onPassportRead(mrzInfo)
+                }
+
+            } catch (e: IllegalStateException) {
+                //The fragment is destroyed
+            }
+        }
+    }
+
+    override fun onMRZReadFailure(timeRequired: Long) {
+        mHandler.post {
+        }
+
+        isDecoding = false
+    }
+
+    override fun onFailure(e: Exception, timeRequired: Long) {
+        isDecoding = false
+        e.printStackTrace()
+        mHandler.post {
+            if (cameraMLKitFragmentListener != null) {
+                cameraMLKitFragmentListener!!.onError()
+            }
+        }
+    }
 
     private val GALLERY_REQUEST_CODE = 1
-    private var fotoapparat: Fotoapparat?=null
+    private var fotoapparat: Fotoapparat? = null
 
     private var mCamera: Camera? = null
     private var mPreview: CameraPreview? = null
     private var frameProcessor: OcrMrzDetectorProcessor? = null
     private var cameraMLKitFragmentListener = this
     private val mHandler = Handler(Looper.getMainLooper())
-
-
+    private var isDecoding = false
+    lateinit var uiScope: CoroutineScope
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        uiScope = CoroutineScope(Dispatchers.IO)
 
         frameProcessor = OcrMrzDetectorProcessor()
         val callbackFrameProcessor = object : FrameProcessor {
-            private var isDecoding = false
             override fun invoke(frame: Frame) {
                 if (!isDecoding) {
                     isDecoding = true
-                    val ocrRecognizeMlKitAsyncTask = OcrRecognizeMlKitAsyncTask2(applicationContext,
-                        frameProcessor!!,
-                        frame,
-                        object : VisionProcessorBase.OcrListener {
-                            override fun onMRZRead(mrzInfo: MRZInfo, timeRequired: Long) {
-                                mHandler.post {
-                                    try {
-//                                        status_view_top!!.text = getString(R.string.status_bar_ocr, mrzInfo.documentNumber, mrzInfo.dateOfBirth, mrzInfo.dateOfExpiry)
-//                                        status_view_bottom!!.text = getString(R.string.status_bar_success, timeRequired)
-//                                        status_view_bottom!!.setTextColor(resources.getColor(R.color.status_text))
-                                        if (cameraMLKitFragmentListener != null) {
-                                            cameraMLKitFragmentListener!!.onPassportRead(mrzInfo)
-                                        }
-
-                                    } catch (e: IllegalStateException) {
-                                        //The fragment is destroyed
-                                    }
-                                }
-                            }
-
-                            override fun onMRZReadFailure(timeRequired: Long) {
-                                mHandler.post {
-//                                    try {
-//                                        status_view_bottom!!.text = getString(R.string.status_bar_failure, timeRequired)
-//                                        status_view_bottom!!.setTextColor(Color.RED)
-//                                        status_view_top!!.text = ""
-//                                    } catch (e: IllegalStateException) {
-//                                        //The fragment is destroyed
-//                                    }
-                                }
-
-                                isDecoding = false
-                            }
-
-                            override fun onFailure(e: Exception, timeRequired: Long) {
-                                isDecoding = false
-                                e.printStackTrace()
-                                mHandler.post {
-                                    if (cameraMLKitFragmentListener != null) {
-                                        cameraMLKitFragmentListener!!.onError()
-                                    }
-                                }
-                            }
-                        })
-                    ocrRecognizeMlKitAsyncTask.execute()
+                    getProccessScanRx(frame)
                 }
             }
 
@@ -106,6 +98,13 @@ class MainActivity : AppCompatActivity(),CameraMLKItListener {
 
         galleryButton.setOnClickListener {
             pickFromGallery()
+        }
+    }
+
+
+    private fun getProccessScanRx(frame: Frame) {
+        uiScope.launch {
+            frameProcessor?.process(frame, this@MainActivity)
         }
     }
 
@@ -128,8 +127,8 @@ class MainActivity : AppCompatActivity(),CameraMLKItListener {
     }
 
     override fun onPassportRead(mrzInfo: MRZInfo) {
-        val intent = Intent(this,SecondActivity::class.java)
-        intent.putExtra("MRZInfo",mrzInfo)
+        val intent = Intent(this, SecondActivity::class.java)
+        intent.putExtra("MRZInfo", mrzInfo)
         startActivity(intent)
 //        documentText.text = mrzInfo.documentNumber
 //        birthDate.text = mrzInfo.dateOfBirth
@@ -223,7 +222,7 @@ class MainActivity : AppCompatActivity(),CameraMLKItListener {
         }
     }
 
-    fun abc(results: FirebaseVisionText){
+    fun abc(results: FirebaseVisionText) {
         var fullRead = ""
         val blocks = results.textBlocks
         for (i in blocks.indices) {
@@ -234,7 +233,8 @@ class MainActivity : AppCompatActivity(),CameraMLKItListener {
                 //temp+=lines.get(j).getText().trim()+"-";
                 temp += lines[j].text + "-"
             }
-            temp = temp.replace("\r".toRegex(), "").replace("\n".toRegex(), "").replace("\t".toRegex(), "")
+            temp = temp.replace("\r".toRegex(), "").replace("\n".toRegex(), "")
+                .replace("\t".toRegex(), "")
             fullRead += "$temp-"
         }
 //        Log.d(TAG, "Read: $fullRead")
@@ -253,9 +253,9 @@ class MainActivity : AppCompatActivity(),CameraMLKItListener {
             //As O and 0 and really similar most of the countries just removed them from the passport, so for accuracy I am formatting it
             documentNumber = documentNumber.replace("O".toRegex(), "0")
 
-            Log.d("HELLO3","documentNumber = $documentNumber")
-            Log.d("HELLO3","dateOfBirthDay = $dateOfBirthDay")
-            Log.d("HELLO3","expirationDate = $expirationDate")
+            Log.d("HELLO3", "documentNumber = $documentNumber")
+            Log.d("HELLO3", "dateOfBirthDay = $dateOfBirthDay")
+            Log.d("HELLO3", "expirationDate = $expirationDate")
 //            documentText.text = documentNumber
 //            birthDate.text = dateOfBirthDay
 //            expiryDate.text = expirationDate
@@ -288,41 +288,42 @@ class MainActivity : AppCompatActivity(),CameraMLKItListener {
 
     }
 
-//    @Throws(IOException::class)
-//    fun modifyOrientation(bitmap: Bitmap, image_absolute_path: String): Bitmap {
-//        val ei = ExifInterface(image_absolute_path)
-//        val orientation = ei.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-//
-//        when (orientation) {
-//            ExifInterface.ORIENTATION_ROTATE_90 -> return rotate(bitmap, 90f)
-//
-//            ExifInterface.ORIENTATION_ROTATE_180 -> return rotate(bitmap, 180f)
-//
-//            ExifInterface.ORIENTATION_ROTATE_270 -> return rotate(bitmap, 270f)
-//
-//            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> return flip(bitmap, true, false)
-//
-//            ExifInterface.ORIENTATION_FLIP_VERTICAL -> return flip(bitmap, false, true)
-//
-//            else -> return bitmap
-//        }
-//    }
-//
-//    fun rotate(bitmap: Bitmap, degrees: Float): Bitmap {
-//        val matrix = Matrix()
-//        matrix.postRotate(degrees)
-//        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-//    }
-//
-//    fun flip(bitmap: Bitmap, horizontal: Boolean, vertical: Boolean): Bitmap {
-//        val matrix = Matrix()
-//        matrix.preScale(if (horizontal) -1.0f else 1.0f, if (vertical) -1.0f else 1f)
-//        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-//    }
+    @Throws(IOException::class)
+    fun modifyOrientation(bitmap: Bitmap, image_absolute_path: String): Bitmap {
+        val ei = ExifInterface(image_absolute_path)
+        val orientation = ei.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> return rotate(bitmap, 90f)
+
+            ExifInterface.ORIENTATION_ROTATE_180 -> return rotate(bitmap, 180f)
+
+            ExifInterface.ORIENTATION_ROTATE_270 -> return rotate(bitmap, 270f)
+
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> return flip(bitmap, true, false)
+
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> return flip(bitmap, false, true)
+
+            else -> return bitmap
+        }
+    }
+
+    fun rotate(bitmap: Bitmap, degrees: Float): Bitmap {
+        val matrix = Matrix()
+        matrix.postRotate(degrees)
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    fun flip(bitmap: Bitmap, horizontal: Boolean, vertical: Boolean): Bitmap {
+        val matrix = Matrix()
+        matrix.preScale(if (horizontal) -1.0f else 1.0f, if (vertical) -1.0f else 1f)
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
 
     companion object {
 
-        private val REGEX_OLD_PASSPORT = "[A-Z0-9<]{9}[0-9]{1}[A-Z<]{3}[0-9]{6}[0-9]{1}[FM<]{1}[0-9]{6}[0-9]{1}"
+        private val REGEX_OLD_PASSPORT =
+            "[A-Z0-9<]{9}[0-9]{1}[A-Z<]{3}[0-9]{6}[0-9]{1}[FM<]{1}[0-9]{6}[0-9]{1}"
         private val REGEX_IP_PASSPORT_LINE_1 = "\\bIP[A-Z<]{3}[A-Z0-9<]{9}[0-9]{1}"
         private val REGEX_IP_PASSPORT_LINE_2 = "[0-9]{6}[0-9]{1}[FM<]{1}[0-9]{6}[0-9]{1}[A-Z<]{3}"
     }
