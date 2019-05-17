@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "424057388890",
+    "firebase_url": "https://testmlkitapp-106fe.firebaseio.com",
+    "project_id": "testmlkitapp-106fe",
+    "storage_bucket": "testmlkitapp-106fe.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:424057388890:android:a5b15c18492ffb9f",
+        "android_client_info": {
+          "package_name": "com.ying.mlkit"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "424057388890-ttkdd8vc0jllh7uskierkf68rppd1s3k.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBipj7_Mb5OP8WH1R2e7ixHeXuiwSO7Yqw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "424057388890-ttkdd8vc0jllh7uskierkf68rppd1s3k.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
