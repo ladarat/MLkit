@@ -1,61 +1,144 @@
 package com.ying.mlkit
 
-import android.hardware.Camera
-import android.support.v7.app.AppCompatActivity
-import android.os.Bundle
-import android.content.Intent
-import kotlinx.android.synthetic.main.activity_main.*
-import android.app.Activity
+import androidx.appcompat.app.AppCompatActivity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Matrix
-import android.graphics.Rect
-import android.media.ExifInterface
+import android.hardware.Camera
 import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
-import com.google.android.gms.vision.CameraSource
 import com.google.firebase.ml.vision.FirebaseVision
 import com.google.firebase.ml.vision.common.FirebaseVisionImage
 import com.google.firebase.ml.vision.text.FirebaseVisionText
-import java.io.IOException
+import io.fotoapparat.Fotoapparat
+import io.fotoapparat.preview.Frame
+import io.fotoapparat.util.FrameProcessor
+import kotlinx.android.synthetic.main.activity_main.*
+import org.jmrtd.lds.icao.MRZInfo
 import java.util.regex.Pattern
 
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(),CameraMLKItListener {
 
     private val GALLERY_REQUEST_CODE = 1
+    private var fotoapparat: Fotoapparat?=null
 
     private var mCamera: Camera? = null
     private var mPreview: CameraPreview? = null
+    private var frameProcessor: OcrMrzDetectorProcessor? = null
+    private var cameraMLKitFragmentListener = this
+    private val mHandler = Handler(Looper.getMainLooper())
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-//         Create an instance of Camera
-//        if(checkCameraHardware(this)){
-//            mCamera = getCameraInstance()
-//        }
-//
-//        mPreview = mCamera?.let {
-//            // Create our Preview view
-//            CameraPreview(this, it)
-//        }
-//
-//        // Set the Preview view as the content of our activity.
-//        mPreview?.also {
-//            camera_preview.addView(it)
-//        }
+        frameProcessor = OcrMrzDetectorProcessor()
+        val callbackFrameProcessor = object : FrameProcessor {
+            private var isDecoding = false
+            override fun invoke(frame: Frame) {
+                if (!isDecoding) {
+                    isDecoding = true
+                    val ocrRecognizeMlKitAsyncTask = OcrRecognizeMlKitAsyncTask2(applicationContext,
+                        frameProcessor!!,
+                        frame,
+                        object : VisionProcessorBase.OcrListener {
+                            override fun onMRZRead(mrzInfo: MRZInfo, timeRequired: Long) {
+                                mHandler.post {
+                                    try {
+//                                        status_view_top!!.text = getString(R.string.status_bar_ocr, mrzInfo.documentNumber, mrzInfo.dateOfBirth, mrzInfo.dateOfExpiry)
+//                                        status_view_bottom!!.text = getString(R.string.status_bar_success, timeRequired)
+//                                        status_view_bottom!!.setTextColor(resources.getColor(R.color.status_text))
+                                        if (cameraMLKitFragmentListener != null) {
+                                            cameraMLKitFragmentListener!!.onPassportRead(mrzInfo)
+                                        }
+
+                                    } catch (e: IllegalStateException) {
+                                        //The fragment is destroyed
+                                    }
+                                }
+                            }
+
+                            override fun onMRZReadFailure(timeRequired: Long) {
+                                mHandler.post {
+//                                    try {
+//                                        status_view_bottom!!.text = getString(R.string.status_bar_failure, timeRequired)
+//                                        status_view_bottom!!.setTextColor(Color.RED)
+//                                        status_view_top!!.text = ""
+//                                    } catch (e: IllegalStateException) {
+//                                        //The fragment is destroyed
+//                                    }
+                                }
+
+                                isDecoding = false
+                            }
+
+                            override fun onFailure(e: Exception, timeRequired: Long) {
+                                isDecoding = false
+                                e.printStackTrace()
+                                mHandler.post {
+                                    if (cameraMLKitFragmentListener != null) {
+                                        cameraMLKitFragmentListener!!.onError()
+                                    }
+                                }
+                            }
+                        })
+                    ocrRecognizeMlKitAsyncTask.execute()
+                }
+            }
+
+        }
+
+        fotoapparat = Fotoapparat
+            .with(this)
+            .into(camera_view)
+            .frameProcessor(
+                callbackFrameProcessor
+            )
+            .build()
 
         galleryButton.setOnClickListener {
             pickFromGallery()
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        fotoapparat?.start()
+    }
+
+    override fun onDestroy() {
+        frameProcessor!!.stop()
+        super.onDestroy()
+    }
+
+
+    override fun onPause() {
+        fotoapparat?.stop()
+
+        super.onPause()
+    }
+
+    override fun onPassportRead(mrzInfo: MRZInfo) {
+        val intent = Intent(this,SecondActivity::class.java)
+        intent.putExtra("MRZInfo",mrzInfo)
+        startActivity(intent)
+//        documentText.text = mrzInfo.documentNumber
+//        birthDate.text = mrzInfo.dateOfBirth
+//        expiryDate.text = mrzInfo.dateOfExpiry
+    }
+
+    override fun onError() {
+
+    }
 
     private fun getCameraInstance(): Camera? {
         return try {
@@ -85,14 +168,14 @@ class MainActivity : AppCompatActivity() {
     public override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
 
         // Result code is RESULT_OK only if the user selects an Image
-        if (resultCode == Activity.RESULT_OK)
+        if (resultCode == AppCompatActivity.RESULT_OK)
             when (requestCode) {
                 GALLERY_REQUEST_CODE -> {
                     //data.getData returns the content URI for the selected Image
                     val selectedImage = data!!.data
                     var bitMap = MediaStore.Images.Media.getBitmap(contentResolver, selectedImage)
                     val path = getRealPathFromURI(selectedImage)
-                    bitMap = modifyOrientation(bitMap,path)
+//                    bitMap = modifyOrientation(bitMap,path)
                     analyzeImage(bitMap)
                     imageView.setImageBitmap(bitMap)
                 }
@@ -127,9 +210,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearText() {
-        documentText.text = ""
-        birthDate.text = ""
-        expiryDate.text = ""
+//        documentText.text = ""
+//        birthDate.text = ""
+//        expiryDate.text = ""
     }
 
     private fun showText(result: FirebaseVisionText) {
@@ -173,9 +256,9 @@ class MainActivity : AppCompatActivity() {
             Log.d("HELLO3","documentNumber = $documentNumber")
             Log.d("HELLO3","dateOfBirthDay = $dateOfBirthDay")
             Log.d("HELLO3","expirationDate = $expirationDate")
-            documentText.text = documentNumber
-            birthDate.text = dateOfBirthDay
-            expiryDate.text = expirationDate
+//            documentText.text = documentNumber
+//            birthDate.text = dateOfBirthDay
+//            expiryDate.text = expirationDate
 
 //            val mrzInfo = createDummyMrz(documentNumber, dateOfBirthDay, expirationDate)
 //            ocrListener.onMRZRead(mrzInfo, timeRequired)
@@ -205,37 +288,37 @@ class MainActivity : AppCompatActivity() {
 
     }
 
-    @Throws(IOException::class)
-    fun modifyOrientation(bitmap: Bitmap, image_absolute_path: String): Bitmap {
-        val ei = ExifInterface(image_absolute_path)
-        val orientation = ei.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> return rotate(bitmap, 90f)
-
-            ExifInterface.ORIENTATION_ROTATE_180 -> return rotate(bitmap, 180f)
-
-            ExifInterface.ORIENTATION_ROTATE_270 -> return rotate(bitmap, 270f)
-
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> return flip(bitmap, true, false)
-
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> return flip(bitmap, false, true)
-
-            else -> return bitmap
-        }
-    }
-
-    fun rotate(bitmap: Bitmap, degrees: Float): Bitmap {
-        val matrix = Matrix()
-        matrix.postRotate(degrees)
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-    }
-
-    fun flip(bitmap: Bitmap, horizontal: Boolean, vertical: Boolean): Bitmap {
-        val matrix = Matrix()
-        matrix.preScale(if (horizontal) -1.0f else 1.0f, if (vertical) -1.0f else 1f)
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-    }
+//    @Throws(IOException::class)
+//    fun modifyOrientation(bitmap: Bitmap, image_absolute_path: String): Bitmap {
+//        val ei = ExifInterface(image_absolute_path)
+//        val orientation = ei.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+//
+//        when (orientation) {
+//            ExifInterface.ORIENTATION_ROTATE_90 -> return rotate(bitmap, 90f)
+//
+//            ExifInterface.ORIENTATION_ROTATE_180 -> return rotate(bitmap, 180f)
+//
+//            ExifInterface.ORIENTATION_ROTATE_270 -> return rotate(bitmap, 270f)
+//
+//            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> return flip(bitmap, true, false)
+//
+//            ExifInterface.ORIENTATION_FLIP_VERTICAL -> return flip(bitmap, false, true)
+//
+//            else -> return bitmap
+//        }
+//    }
+//
+//    fun rotate(bitmap: Bitmap, degrees: Float): Bitmap {
+//        val matrix = Matrix()
+//        matrix.postRotate(degrees)
+//        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+//    }
+//
+//    fun flip(bitmap: Bitmap, horizontal: Boolean, vertical: Boolean): Bitmap {
+//        val matrix = Matrix()
+//        matrix.preScale(if (horizontal) -1.0f else 1.0f, if (vertical) -1.0f else 1f)
+//        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+//    }
 
     companion object {
 
